@@ -26,6 +26,18 @@ script (`abogen_client.driver_path()` resolves it in both dev and frozen `_MEIPA
 `@@VAS_EVENT@@{"event": "progress"|"log"|"done"|"error"|"chapters", ...}`. `abogen_client._run_driver`
 parses these; everything else on stdout (abogen logging, ffmpeg) is ignored.
 
+**Two driver modes** (`spec["mode"]`): `extract` returns the chapter list (for the picker dialog); the
+default *generate* accepts `spec["selected_indices"]` and re-synthesizes only the chosen chapters. The
+driver calls Abogen's *web* pipeline in-process (`extract_from_path` → `build_pending_job_from_extraction`
+→ `ConversionService.enqueue(run_conversion_job)` → poll `job.status`) — that's what Abogen's web
+"finish" button does, since it has no real CLI.
+
+**Karaoke highlighting** (`_maybe_install_karaoke`, only when subtitle mode is "Sentence +
+Highlighting"): Abogen's web `SubtitleWriter` emits plain `.ass`, so the driver monkeypatches
+`kokoro.KPipeline.__call__` (to capture per-token timestamps) and the module-level
+`conversion_runner.SubtitleWriter` (to emit `{\kf<cs>}` per word). `get_pipeline` is a closure and
+can't be patched — patch the class method + module attribute instead.
+
 ## Cross-platform model (paths.py is the keystone)
 
 `app/paths.py` is **dependency-free** and the single source of truth for filesystem locations — it
@@ -69,6 +81,21 @@ Default preset: 1080p/24fps/black/`-shortest`, `libopus 48k mono`, platform hard
 robustness tricks (all deliberate): render to `<name>.part` then atomic `os.replace`; copy the `.ass`
 to a temp `sub.ass` and run ffmpeg with `cwd` there (sidesteps Windows subtitle-path escaping); pass an
 explicit `-f <mux>`; `set_ass_font_size()` rewrites the `.ass` Style fontsize; encoders auto-detected.
+
+## Tabs & workers
+
+`main.py` builds four tabs: **Full Pipeline** (`ui/pipeline_tab.py`, book→audio→video), **Abogen**
+(`ui/abogen_tab.py`, audio-only — *subclasses `PipelineTab`* with `audio_only=True`, reusing its
+provisioning/voice/chapter machinery), **FFMPEG** (`ui/video_tab.py`, render existing `.m4b`+`.ass`),
+**Settings** (`ui/settings_tab.py`, tool paths + "Set up ffmpeg" + default folders).
+
+Long work runs on QThreads in `ui/*_worker.py`, posting results via Qt signals: `PipelineWorker`
+(Abogen then ffmpeg per book), `RenderWorker` (ffmpeg only), `ProvisionWorker` (install Abogen),
+`ExtractWorker` (chapter list). The render/pipeline workers parallelize with a `ThreadPoolExecutor`
+sized by the "Parallel" spinbox (default 3, cap 12) and call `ensure_ffmpeg()` at the top of `run()`.
+`PipelineWorker` generates into a **temp dir** then moves `.m4b`/`.ass` to the audio folder and `.mp4`
+to the output folder, flat (Abogen forces a timestamped subfolder internally — hence temp-then-move via
+`_move_into`).
 
 ## Commands
 

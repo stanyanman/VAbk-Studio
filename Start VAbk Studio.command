@@ -23,4 +23,6 @@ if [ ! -x "$VENV_PY" ]; then
     fi
 fi
 
-exec "$VENV_PY" run.py "$@"
+# Launch detached so closing the Terminal window doesn't kill the app.
+nohup "$VENV_PY" run.py "$@" >/dev/null 2>&1 &
+disown 2>/dev/null || true
