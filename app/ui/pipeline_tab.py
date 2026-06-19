@@ -24,7 +24,7 @@ from ..provisioning import (
 )
 from ..video_builder import VideoSettings, find_executable
 from .chapter_dialog import ChapterSelectDialog
-from .pipeline_worker import ExtractWorker, PipelineWorker, ProvisionWorker
+from .pipeline_worker import ExtractWorker, FfmpegWorker, PipelineWorker, ProvisionWorker
 
 INPUT_EXTS = (".epub", ".pdf", ".txt", ".md", ".markdown")
 SUBTITLE_MODES = ["Disabled", "Line", "Sentence", "Sentence + Comma",
@@ -110,15 +110,7 @@ class PipelineTab(QWidget):
     # ---- UI --------------------------------------------------------------
     def _build_ui(self):
         root = QVBoxLayout(self)
-
-        # Runtime status row
-        self._status_row = QHBoxLayout()
-        self.status_label = QLabel("Checking Abogen runtime…")
-        self.setup_btn = QPushButton("Set up / Update Abogen")
-        self.setup_btn.clicked.connect(self._setup_abogen)
-        self._status_row.addWidget(self.status_label, 1)
-        self._status_row.addWidget(self.setup_btn)
-        root.addLayout(self._status_row)
+        root.addWidget(self._build_status_row(include_ffmpeg=True))
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
@@ -256,33 +248,76 @@ class PipelineTab(QWidget):
         })
         return ab
 
-    # ---- runtime status / provisioning ----------------------------------
+    # ---- runtime status / dependencies ----------------------------------
+    _STATUS_STYLE = {
+        "ok": "color:#1a9e4b; font-weight:600;",       # green
+        "missing": "color:#d23b3b; font-weight:600;",  # red
+        "busy": "color:#c08000; font-weight:600;",     # amber
+    }
+
+    def _build_status_row(self, include_ffmpeg: bool) -> QWidget:
+        """Dependency status indicators + a single 'Download Dependencies' button."""
+        self._include_ffmpeg = include_ffmpeg
+        w = QWidget()
+        row = QHBoxLayout(w)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.abogen_status = QLabel("Abogen: checking…")
+        row.addWidget(self.abogen_status)
+        if include_ffmpeg:
+            dot = QLabel("·")
+            dot.setStyleSheet("color:#888;")
+            row.addWidget(dot)
+            self.ffmpeg_status = QLabel("FFmpeg: checking…")
+            row.addWidget(self.ffmpeg_status)
+        row.addStretch(1)
+        self.use_existing_btn = QPushButton("Use existing")
+        self.use_existing_btn.setVisible(False)
+        self.use_existing_btn.clicked.connect(self._adopt_existing)
+        row.addWidget(self.use_existing_btn)
+        self.setup_btn = QPushButton("Download Dependencies")
+        self.setup_btn.clicked.connect(self._download_dependencies)
+        row.addWidget(self.setup_btn)
+        return w
+
+    def _set_dep_status(self, label: QLabel, state: str, text: str) -> None:
+        label.setText(text)
+        label.setStyleSheet(self._STATUS_STYLE.get(state, "color:#888;"))
+
+    def _abogen_ready(self) -> bool:
+        return resolve_abogen_python(self.cfg) is not None
+
+    def _ffmpeg_ready(self) -> bool:
+        return find_executable("ffmpeg", self.cfg.get("ffmpeg_path", "")) is not None
+
     def _refresh_runtime_status(self):
         abopy = resolve_abogen_python(self.cfg)
         if abopy:
-            self.status_label.setText(f"✓ Abogen ready  ({abopy})")
-            self.setup_btn.setText("Update Abogen")
+            self._set_dep_status(self.abogen_status, "ok", "Abogen: ✓ ready")
+            self.use_existing_btn.setVisible(False)
             self._load_voices(abopy)
         else:
             existing = detect_existing_abogen()
-            if existing:
-                self.status_label.setText(
-                    "Abogen not provisioned. An existing install was found — click "
-                    "'Use existing' or set up a fresh copy.")
-                self.setup_btn.setText("Set up Abogen")
-                if not hasattr(self, "_use_existing_btn"):
-                    self._use_existing_btn = QPushButton("Use existing")
-                    self._use_existing_btn.clicked.connect(
-                        lambda: self._adopt_python(existing))
-                    self._status_row.insertWidget(1, self._use_existing_btn)
+            self.use_existing_btn.setVisible(bool(existing))
+            self._set_dep_status(
+                self.abogen_status, "missing",
+                "Abogen: ✗ not installed" + ("  (existing found)" if existing else ""))
+        if self._include_ffmpeg:
+            if self._ffmpeg_ready():
+                self._set_dep_status(self.ffmpeg_status, "ok", "FFmpeg: ✓ ready")
             else:
-                self.status_label.setText("⚠ Abogen not installed. Click 'Set up Abogen' (first run downloads several GB).")
-                self.setup_btn.setText("Set up Abogen")
+                self._set_dep_status(self.ffmpeg_status, "missing", "FFmpeg: ✗ not installed")
+        self._update_download_btn()
 
-    def _adopt_python(self, py: str):
-        self.cfg["abogen_python"] = py
-        self._save_cfg(self.cfg)
-        self._refresh_runtime_status()
+    def _update_download_btn(self):
+        missing = (not self._abogen_ready()) or (self._include_ffmpeg and not self._ffmpeg_ready())
+        self.setup_btn.setText("Download Dependencies" if missing else "Re-check / update")
+
+    def _adopt_existing(self):
+        existing = detect_existing_abogen()
+        if existing:
+            self.cfg["abogen_python"] = existing
+            self._save_cfg(self.cfg)
+            self._refresh_runtime_status()
 
     def _load_voices(self, abopy: str):
         self._voice_loader = _VoiceLoader(abopy)
@@ -304,32 +339,72 @@ class PipelineTab(QWidget):
         self.voice_combo.addItems(voices)
         self.voice_combo.setCurrentText(cur if cur in voices else "af_heart")
 
-    def _setup_abogen(self):
+    # ---- download dependencies (Abogen + ffmpeg) ------------------------
+    def _download_dependencies(self):
         if self.prov and self.prov.isRunning():
             return
-        runtime = self.cfg.get("abogen_runtime_dir", "")
-        msg = ("This installs the latest Abogen from GitHub into an isolated "
-               "environment using uv. The first run downloads several GB "
-               "(PyTorch + models). Continue?")
-        if QMessageBox.question(self, "Set up Abogen", msg) != QMessageBox.StandardButton.Yes:
+        need_ab = not self._abogen_ready()
+        need_ff = self._include_ffmpeg and not self._ffmpeg_ready()
+        if not need_ab and not need_ff:
+            self._refresh_runtime_status()
+            QMessageBox.information(self, "Dependencies", "Everything is already set up and ready.")
             return
+        if need_ab:
+            msg = ("This downloads the heavy dependencies into the app's data folder "
+                   "(one-time):\n\n• Abogen + PyTorch + voice models (several GB)\n"
+                   + ("• ffmpeg (~106 MB)\n" if need_ff else "") + "\nContinue?")
+            if QMessageBox.question(self, "Download Dependencies",
+                                    msg) != QMessageBox.StandardButton.Yes:
+                return
         self.setup_btn.setEnabled(False)
-        self.status_label.setText("Installing Abogen… (see log)")
-        self.prov = ProvisionWorker(runtime, self.cfg.get("abogen_pin", DEFAULT_PIN),
-                                    detect_accelerator() != "cpu")
-        self.prov.log.connect(self.log_view.appendPlainText)
-        self.prov.done.connect(self._on_provisioned)
-        self.prov.start()
+        self._dep_jobs = 0
+        if need_ff:
+            self._dep_jobs += 1
+            self._set_dep_status(self.ffmpeg_status, "busy", "FFmpeg: downloading…")
+            self._ffmpeg_worker = FfmpegWorker(self.cfg.get("ffmpeg_path", ""),
+                                               self.cfg.get("ffprobe_path", ""))
+            self._ffmpeg_worker.log.connect(self.log_view.appendPlainText)
+            self._ffmpeg_worker.done.connect(self._on_ffmpeg_downloaded)
+            self._ffmpeg_worker.start()
+        if need_ab:
+            self._dep_jobs += 1
+            self.use_existing_btn.setVisible(False)
+            self._set_dep_status(self.abogen_status, "busy", "Abogen: installing… (see log)")
+            self.prov = ProvisionWorker(self.cfg.get("abogen_runtime_dir", ""),
+                                        self.cfg.get("abogen_pin", DEFAULT_PIN),
+                                        detect_accelerator() != "cpu")
+            self.prov.log.connect(self.log_view.appendPlainText)
+            self.prov.done.connect(self._on_provisioned)
+            self.prov.start()
+
+    def _on_ffmpeg_downloaded(self, ok: bool, ff: str, fp: str):
+        if ok and ff:
+            self.cfg["ffmpeg_path"] = ff
+            self.cfg["ffprobe_path"] = fp
+            self._save_cfg(self.cfg)
+            self._set_dep_status(self.ffmpeg_status, "ok", "FFmpeg: ✓ ready")
+        else:
+            self._set_dep_status(self.ffmpeg_status, "missing", "FFmpeg: ✗ download failed")
+        self._dep_done()
 
     def _on_provisioned(self, ok: bool, info: str):
-        self.setup_btn.setEnabled(True)
         if ok:
             self.cfg["abogen_python"] = ""  # use provisioned env
             self._save_cfg(self.cfg)
-            QMessageBox.information(self, "Abogen ready", "Abogen installed successfully.")
+            self._set_dep_status(self.abogen_status, "ok", "Abogen: ✓ ready")
+            abopy = resolve_abogen_python(self.cfg)
+            if abopy:
+                self._load_voices(abopy)
         else:
-            QMessageBox.warning(self, "Setup failed", info)
-        self._refresh_runtime_status()
+            self._set_dep_status(self.abogen_status, "missing", "Abogen: ✗ install failed")
+            QMessageBox.warning(self, "Abogen setup failed", info)
+        self._dep_done()
+
+    def _dep_done(self):
+        self._dep_jobs = getattr(self, "_dep_jobs", 1) - 1
+        if self._dep_jobs <= 0:
+            self.setup_btn.setEnabled(True)
+            self._update_download_btn()
 
     # ---- inputs ----------------------------------------------------------
     def _add_paths(self, paths):

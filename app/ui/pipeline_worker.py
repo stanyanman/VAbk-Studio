@@ -174,3 +174,23 @@ class ProvisionWorker(QThread):
             self.done.emit(True, str(py))
         except Exception as exc:  # noqa: BLE001
             self.done.emit(False, str(exc))
+
+
+class FfmpegWorker(QThread):
+    """Auto-download the pinned static ffmpeg off the UI thread."""
+
+    log = pyqtSignal(str)
+    done = pyqtSignal(bool, str, str)  # ok, ffmpeg path, ffprobe path
+
+    def __init__(self, ffmpeg_pref="", ffprobe_pref="", parent=None):
+        super().__init__(parent)
+        self._ff = ffmpeg_pref
+        self._fp = ffprobe_pref
+
+    def run(self) -> None:
+        try:
+            ff, fp = ensure_ffmpeg(self._ff, self._fp, on_log=self.log.emit)
+            self.done.emit(True, ff, fp)
+        except Exception as exc:  # noqa: BLE001
+            self.log.emit(f"ffmpeg setup failed: {exc}")
+            self.done.emit(False, "", "")

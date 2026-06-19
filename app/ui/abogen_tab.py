@@ -34,14 +34,8 @@ class AbogenTab(PipelineTab):
     def _build_ui(self):
         root = QVBoxLayout(self)
 
-        # Runtime status row (identical to Full Pipeline)
-        self._status_row = QHBoxLayout()
-        self.status_label = QLabel("Checking Abogen runtime…")
-        self.setup_btn = QPushButton("Set up / Update Abogen")
-        self.setup_btn.clicked.connect(self._setup_abogen)
-        self._status_row.addWidget(self.status_label, 1)
-        self._status_row.addWidget(self.setup_btn)
-        root.addLayout(self._status_row)
+        # Dependency status row (Abogen only — this tab renders no video)
+        root.addWidget(self._build_status_row(include_ffmpeg=False))
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         root.addWidget(splitter, 1)
