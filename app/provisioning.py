@@ -1,18 +1,17 @@
-"""Provision and locate the external Abogen runtime + ffmpeg.
+"""Provision and locate the external Abogen runtime + ffmpeg (Windows).
 
-The app does NOT embed Abogen (CUDA/MPS PyTorch + Kokoro models are multi-GB).
-Instead it manages an isolated Python environment, installing the latest Abogen
-from GitHub with `uv`, pinned to a known-good commit.
+The app does NOT embed Abogen (CUDA PyTorch + Kokoro models are multi-GB). It
+manages an isolated Python environment, installing Abogen from GitHub with `uv`
+(auto-downloaded into the app folder if not on PATH), pinned to a known-good commit.
 
-ffmpeg is reused from the user's install if present (Settings path / PATH / on
-macOS Homebrew), else auto-downloaded as a pinned, static, checksum-verified build
-into the app's config dir — see `ensure_ffmpeg()`.
+ffmpeg is reused from the user's install if present (Settings path / PATH), else
+auto-downloaded as a pinned, static, checksum-verified build. Everything the app
+needs lands inside the app's data folder — see `ensure_ffmpeg()` / `ensure_uv()`.
 """
 from __future__ import annotations
 
 import hashlib
 import os
-import platform
 import shutil
 import subprocess
 import sys
@@ -22,7 +21,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from .paths import ffmpeg_cache_dir, uv_cache_dir
+from .paths import config_dir, ffmpeg_cache_dir, uv_cache_dir
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -38,12 +37,55 @@ def _log(on_log: Optional[LogFn], msg: str) -> None:
         on_log(msg)
 
 
+# Pinned uv, auto-downloaded into the app folder if not already installed.
+UV_BUILD = {
+    "version": "0.11.23",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.11.23/uv-x86_64-pc-windows-msvc.zip",
+    "sha256": "02ad29f07e674d68726ba3bb1ff25b335d83515756e2b1a194bb56c3cc30e07c",
+}
+
+
+def _uv_dir() -> Path:
+    d = config_dir() / "uv"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def find_uv() -> Optional[str]:
+    """Locate uv: PATH, the user's ~/.local/bin, or the app's own data/uv cache."""
     found = shutil.which("uv")
     if found:
         return found
-    candidate = Path.home() / ".local" / "bin" / ("uv.exe" if os.name == "nt" else "uv")
-    return str(candidate) if candidate.is_file() else None
+    for cand in (Path.home() / ".local" / "bin" / ("uv.exe" if os.name == "nt" else "uv"),
+                 _uv_dir() / ("uv" + _EXE)):
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
+def ensure_uv(on_log: Optional[LogFn] = None) -> Optional[str]:
+    """Return a uv executable, downloading a pinned copy into data/uv if needed.
+
+    Keeps uv inside the app folder so nothing has to be pre-installed system-wide.
+    """
+    found = find_uv()
+    if found:
+        return found
+    if sys.platform != "win32":
+        return None  # only the Windows uv build is bundled for auto-download
+    _log(on_log, f"Downloading uv {UV_BUILD['version']} (one-time)…")
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
+        arc = Path(td) / "uv.zip"
+        _download(UV_BUILD["url"], arc, on_log)
+        actual = _sha256(arc)
+        if actual.lower() != UV_BUILD["sha256"].lower():
+            raise RuntimeError(
+                "uv download failed checksum verification:\n"
+                f"  expected {UV_BUILD['sha256']}\n  got      {actual}")
+        _extract(arc, "zip", {"uv" + _EXE: "uv" + _EXE}, _uv_dir())
+    uv = _uv_dir() / ("uv" + _EXE)
+    _log(on_log, "uv ready.")
+    return str(uv) if uv.is_file() else None
 
 
 def has_nvidia_gpu() -> bool:
@@ -59,24 +101,17 @@ def has_nvidia_gpu() -> bool:
 
 
 def detect_accelerator() -> str:
-    """Best available compute backend for Kokoro TTS: 'cuda' | 'mps' | 'cpu'.
+    """Compute backend for Kokoro TTS: 'cuda' (NVIDIA) or 'cpu'.
 
-    Apple Silicon → 'mps' (PyTorch Metal). NVIDIA → 'cuda'. Otherwise 'cpu'.
-    This (not has_nvidia_gpu) is what drives the torch wheel choice, so a Mac
-    installs the MPS-capable wheel instead of CPU-only.
+    Drives the torch wheel choice during provisioning.
     """
-    if sys.platform == "darwin" and platform.machine() == "arm64":
-        return "mps"
-    if has_nvidia_gpu():
-        return "cuda"
-    return "cpu"
+    return "cuda" if has_nvidia_gpu() else "cpu"
 
 
 def accelerator_label() -> str:
     return {
         "cuda": "NVIDIA GPU (CUDA)",
-        "mps": "Apple Silicon GPU (Metal / MPS)",
-        "cpu": "CPU only (no GPU acceleration detected)",
+        "cpu": "CPU only (no NVIDIA GPU detected)",
     }[detect_accelerator()]
 
 
@@ -143,12 +178,11 @@ def provision_abogen(
     """Create the isolated env and install Abogen from GitHub. Returns env python.
 
     Heavy (multi-GB on first run). The torch wheel is chosen from the detected
-    accelerator: CUDA/MPS via ``--torch-backend auto`` (uv resolves the right wheel
-    per platform — the macOS wheel is MPS-capable), CPU-only via ``cpu``.
+    accelerator: CUDA via ``--torch-backend auto``, else CPU-only via ``cpu``.
     """
-    uv = find_uv()
+    uv = ensure_uv(on_log)
     if not uv:
-        raise RuntimeError("uv is not installed. Install it from https://docs.astral.sh/uv/ first.")
+        raise RuntimeError("Could not find or download uv. Install it from https://docs.astral.sh/uv/ .")
 
     # Keep uv's cache inside the app data dir, co-located with the venv, so installs
     # hardlink instead of copy and stay self-contained.
@@ -220,14 +254,11 @@ def resolve_abogen_python(cfg: dict) -> Optional[str]:
 # ffmpeg auto-provisioning (pinned, static, checksum-verified)
 # ---------------------------------------------------------------------------
 _EXE = ".exe" if os.name == "nt" else ""
-# GUI apps on macOS don't inherit the shell PATH, so look in the common brew dirs.
-_MAC_EXTRA_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 
-# Pinned static builds. Bump the version/url/sha256 here to update (or use the
-# "Set up ffmpeg" button, which re-downloads). Checksums are verified before use.
-# Both are .zip — extracted with the stdlib zipfile (no extra dependency).
-#   Windows : gyan.dev "essentials" (GPL static, includes NVENC + x264/x265).
-#   macOS   : osxexperts arm64 static (VideoToolbox comes from the OS).
+# Pinned static build. Bump the version/url/sha256 here to update (or use the
+# "Set up ffmpeg" button, which re-downloads). Checksum is verified before use.
+# A .zip extracted with the stdlib zipfile (no extra dependency): gyan.dev
+# "essentials" (GPL static, includes NVENC + x264/x265).
 FFMPEG_BUILDS = {
     "win-x64": {
         "version": "8.0.1 (gyan.dev essentials, GPL)",
@@ -244,49 +275,20 @@ FFMPEG_BUILDS = {
             },
         ],
     },
-    "macos-arm64": {
-        "version": "8.1 (osxexperts arm64, GPL)",
-        "approx_mb": 45,
-        # osxexperts' *published* checksums are stale/incorrect; these are the
-        # values verified against the actual bytes served (2026-06-19).
-        "downloads": [
-            {
-                "url": "https://www.osxexperts.net/ffmpeg81arm.zip",
-                "sha256": "ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad",
-                "type": "zip",
-                "extract": {"ffmpeg": "ffmpeg"},
-            },
-            {
-                "url": "https://www.osxexperts.net/ffprobe81arm.zip",
-                "sha256": "a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1",
-                "type": "zip",
-                "extract": {"ffprobe": "ffprobe"},
-            },
-        ],
-    },
 }
 
 
 def _ffmpeg_platform_key() -> Optional[str]:
-    if sys.platform == "win32":
-        return "win-x64"
-    if sys.platform == "darwin" and platform.machine() == "arm64":
-        return "macos-arm64"
-    return None  # Linux / Intel mac: rely on PATH / the system package manager
+    return "win-x64" if sys.platform == "win32" else None
 
 
 def _find_ffmpeg_exe(name: str, preferred: str = "") -> Optional[str]:
-    """preferred path -> PATH -> (macOS) Homebrew dirs -> download cache. Else None."""
+    """preferred path -> PATH -> download cache. Else None."""
     if preferred and Path(preferred).is_file():
         return preferred
     found = shutil.which(name)
     if found:
         return found
-    if sys.platform == "darwin":
-        for d in _MAC_EXTRA_DIRS:
-            cand = Path(d) / name
-            if cand.is_file():
-                return str(cand)
     cached = ffmpeg_cache_dir() / (name + _EXE)
     return str(cached) if cached.is_file() else None
 
@@ -340,10 +342,10 @@ def ensure_ffmpeg(ffmpeg_pref: str = "", ffprobe_pref: str = "", *,
                   on_log: Optional[LogFn] = None, force: bool = False) -> tuple[str, str]:
     """Resolve ffmpeg & ffprobe, auto-downloading a pinned static build if missing.
 
-    Resolution order: explicit path -> PATH -> (macOS) Homebrew -> download cache.
+    Resolution order: explicit path -> PATH -> download cache (in the app folder).
     On a fresh machine with neither tool present, downloads + checksum-verifies the
-    pinned build into the config dir. Returns (ffmpeg, ffprobe); values may be bare
-    names already found on PATH. Safe to call from a worker thread.
+    pinned build. Returns (ffmpeg, ffprobe); values may be bare names found on PATH.
+    Safe to call from a worker thread.
     """
     if not force:
         ff = _find_ffmpeg_exe("ffmpeg", ffmpeg_pref)

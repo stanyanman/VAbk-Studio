@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import subprocess
 import sys
 import tempfile
@@ -18,6 +17,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from .abogen_driver import EVENT_SENTINEL
+from .paths import config_dir
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -25,19 +25,19 @@ CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 def _driver_env() -> dict:
     """Environment for the Abogen interpreter.
 
-    On Apple Silicon, set PYTORCH_ENABLE_MPS_FALLBACK=1. Abogen sets this in its
-    `main.py`, but the driver imports Abogen modules directly and never runs
-    `main.py`; without it, Kokoro's MPS-unsupported ops would hard-error instead of
-    falling back per-op to CPU. (Harmless on other platforms — it's never read.)
+    Point HuggingFace's cache (the Kokoro model + voice assets) into the app's data
+    folder, so everything the app downloads stays inside the app folder instead of
+    the user profile (~/.cache/huggingface).
     """
     env = dict(os.environ)
-    if sys.platform == "darwin" and platform.machine() == "arm64":
-        env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+    hf = config_dir() / "hf-cache"
+    hf.mkdir(parents=True, exist_ok=True)
+    env.setdefault("HF_HOME", str(hf))
     return env
 
 
 def gpu_status(abogen_python: str, use_gpu: bool = True) -> str:
-    """Abogen's own active-device message (e.g. 'MPS GPU available and enabled.').
+    """Abogen's own active-device message (e.g. 'CUDA GPU available and enabled.').
 
     Runs `abogen.utils.get_gpu_acceleration` inside the Abogen interpreter so the
     UI can show the real backend and confirm acceleration is on (not silently CPU).

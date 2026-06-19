@@ -48,7 +48,7 @@ class _VoiceLoader(QThread):
 
 
 class _GpuStatusLoader(QThread):
-    """Probe Abogen for its real active device (e.g. 'MPS GPU available and enabled.')."""
+    """Probe Abogen for its real active device (e.g. 'CUDA GPU available and enabled.')."""
     loaded = pyqtSignal(str)
 
     def __init__(self, abopy, use_gpu, parent=None):

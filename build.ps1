@@ -3,17 +3,19 @@
 #   Usage:  .\build.ps1
 #
 # Optional: most users just run from source (see "Start VAbk Studio.bat" / README).
-# Requires Python 3.12 (or uv) on PATH. Creates an isolated .venv, installs the
-# GUI dependencies from requirements.txt, and runs PyInstaller. The app itself
-# does NOT bundle Abogen or ffmpeg, so the build stays small (~38 MB).
-$ErrorActionPreference = 'Stop'
-Set-Location -Path $PSScriptRoot
+# Requires Python 3.12 (or uv) on PATH. Creates an isolated .venv, installs the GUI
+# dependencies + PyInstaller, and builds the exe. The app does NOT bundle Abogen or
+# ffmpeg, so the build stays small (~40 MB).
+#
+# Note: we intentionally do NOT use `$ErrorActionPreference = 'Stop'` — uv and
+# PyInstaller write progress to stderr, which that setting would treat as fatal.
+# We check $LASTEXITCODE after each native command instead.
 
+Set-Location -Path $PSScriptRoot
 $venvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 
-function Test-Cmd($name) {
-    return $null -ne (Get-Command $name -ErrorAction SilentlyContinue)
-}
+function Test-Cmd($name) { return $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
+function Die($msg) { Write-Host $msg -ForegroundColor Red; exit 1 }
 
 if (-not (Test-Path $venvPy)) {
     if (Test-Cmd 'uv') {
@@ -26,8 +28,9 @@ if (-not (Test-Path $venvPy)) {
         Write-Host '==> Creating .venv with python...' -ForegroundColor Cyan
         python -m venv .venv
     } else {
-        throw 'No uv / py / python found on PATH. Install Python 3.12 or uv first.'
+        Die 'No uv / py / python found on PATH. Install Python 3.12 or uv first.'
     }
+    if ($LASTEXITCODE -ne 0) { Die 'Failed to create the virtual environment.' }
 }
 
 Write-Host '==> Installing dependencies (requirements.txt + PyInstaller)...' -ForegroundColor Cyan
@@ -37,13 +40,15 @@ if (Test-Cmd 'uv') {
     & $venvPy -m pip install --upgrade pip
     & $venvPy -m pip install -r requirements.txt pyinstaller==6.21.0
 }
+if ($LASTEXITCODE -ne 0) { Die 'Dependency installation failed.' }
 
 Write-Host '==> Building with PyInstaller...' -ForegroundColor Cyan
 & $venvPy -m PyInstaller build\VAbkStudio.spec --noconfirm --distpath dist --workpath build\work
+if ($LASTEXITCODE -ne 0) { Die 'PyInstaller build failed.' }
 
 $exe = Join-Path $PSScriptRoot 'dist\VAbkStudio.exe'
 if (Test-Path $exe) {
     Write-Host ("==> Done. Built: {0}" -f $exe) -ForegroundColor Green
 } else {
-    throw 'Build finished but dist\VAbkStudio.exe was not found.'
+    Die 'Build finished but dist\VAbkStudio.exe was not found.'
 }

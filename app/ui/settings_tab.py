@@ -88,7 +88,6 @@ class SettingsTab(QWidget):
         if ff:
             encs = available_encoders(ff)
             wanted = [e for e in ("hevc_nvenc", "h264_nvenc", "av1_nvenc",
-                                  "hevc_videotoolbox", "h264_videotoolbox",
                                   "libx265", "libx264", "libaom-av1", "libopus") if e in encs]
             self.enc_label.setText(", ".join(wanted) or "none found")
         else:

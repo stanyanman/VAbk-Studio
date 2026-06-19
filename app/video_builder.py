@@ -21,7 +21,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 from dataclasses import dataclass, field, asdict
@@ -104,8 +103,6 @@ VIDEO_CODECS = {
     "HEVC (NVENC, GPU)": "hevc_nvenc",
     "H.264 (NVENC, GPU)": "h264_nvenc",
     "AV1 (NVENC, GPU)": "av1_nvenc",
-    "HEVC (VideoToolbox, GPU)": "hevc_videotoolbox",
-    "H.264 (VideoToolbox, GPU)": "h264_videotoolbox",
     "HEVC (x265, CPU)": "libx265",
     "H.264 (x264, CPU)": "libx264",
     "AV1 (aom, CPU)": "libaom-av1",
@@ -117,7 +114,6 @@ X26X_PRESETS = ["ultrafast", "superfast", "veryfast", "faster", "fast",
 
 _CODEC_SHORT = {
     "hevc_nvenc": "hevc", "h264_nvenc": "h264", "av1_nvenc": "av1",
-    "hevc_videotoolbox": "hevc", "h264_videotoolbox": "h264",
     "libx265": "x265", "libx264": "x264", "libaom-av1": "av1",
 }
 
@@ -126,26 +122,16 @@ def is_nvenc(codec: str) -> bool:
     return codec.endswith("_nvenc")
 
 
-def is_videotoolbox(codec: str) -> bool:
-    return codec.endswith("_videotoolbox")
-
-
 def default_video_codec() -> str:
-    """Best hardware encoder for this platform (the UI filters by availability and
-    falls back to a CPU encoder if this one isn't present)."""
-    if sys.platform == "darwin":
-        return "hevc_videotoolbox"   # Apple Silicon / VideoToolbox
-    return "hevc_nvenc"              # Windows/Linux + NVIDIA
+    """Default hardware encoder (the UI filters by availability and falls back to a
+    CPU encoder such as x265 if NVENC isn't present)."""
+    return "hevc_nvenc"
 
 
 def default_video_settings() -> "VideoSettings":
-    """VideoSettings with a platform-appropriate default codec + quality."""
+    """VideoSettings with the default codec."""
     s = VideoSettings()
     s.video_codec = default_video_codec()
-    if is_videotoolbox(s.video_codec):
-        # VideoToolbox uses -q:v (≈1-100, higher = better), not CQ/CRF. 60 ≈ visually
-        # lossless for caption-on-black content.
-        s.quality = 60
     return s
 
 
@@ -158,11 +144,7 @@ def presets_for(codec: str) -> list[str]:
 
 
 def quality_label(codec: str) -> str:
-    if is_nvenc(codec):
-        return "CQ"
-    if is_videotoolbox(codec):
-        return "Q"
-    return "CRF"
+    return "CQ" if is_nvenc(codec) else "CRF"
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +183,6 @@ class VideoSettings:
 def quality_flags(s: VideoSettings) -> list[str]:
     if is_nvenc(s.video_codec):
         return ["-cq", str(s.quality)]
-    if is_videotoolbox(s.video_codec):
-        # VideoToolbox constant quality (-q:v ≈1-100, higher = better). -allow_sw lets
-        # it fall back to the software VideoToolbox encoder if HW HEVC is unavailable.
-        return ["-q:v", str(s.quality), "-allow_sw", "1"]
     if s.video_codec == "libaom-av1":
         return ["-crf", str(s.quality), "-b:v", "0"]
     return ["-crf", str(s.quality)]
@@ -213,8 +191,7 @@ def quality_flags(s: VideoSettings) -> list[str]:
 def derive_suffix(s: VideoSettings) -> str:
     """e.g. '1080p_24fps_hevc_cq35_opus48k_p5' — matches the user's naming."""
     parts = [f"{s.height}p", f"{s.fps}fps", _CODEC_SHORT.get(s.video_codec, s.video_codec)]
-    qtag = "cq" if is_nvenc(s.video_codec) else ("q" if is_videotoolbox(s.video_codec) else "crf")
-    parts.append(qtag + str(s.quality))
+    parts.append(("cq" if is_nvenc(s.video_codec) else "crf") + str(s.quality))
     if s.audio_mode == "copy":
         parts.append("audiocopy")
     else:

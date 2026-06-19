@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**VAbk Studio** — a cross-platform (Windows + macOS) PyQt6 app that turns books into "visual
-audiobooks" (a video of word-synced karaoke captions over a black canvas while narration plays). It
-is a thin **GUI orchestrator**: it does NOT embed Abogen (Kokoro TTS) or ffmpeg — it drives them as
-external processes. See `README.md` for the end-user tour, `CONTRIBUTING.md` for how to verify changes.
+**VAbk Studio** — a **Windows** PyQt6 app that turns books into "visual audiobooks" (a video of
+word-synced karaoke captions over a black canvas while narration plays). It is a thin **GUI
+orchestrator**: it does NOT embed Abogen (Kokoro TTS) or ffmpeg — it downloads and drives them. Every
+heavy piece (uv, ffmpeg, the Abogen env, models) lands in a `data/` folder beside the app, so it's
+self-contained/portable. See `README.md` for the end-user tour, `CONTRIBUTING.md` for verifying changes.
 
 **Status:** experimental, vibecoded for personal use — built fast and shared as-is. Favor pragmatic,
 working fixes over ceremony; there's no test/lint suite and stability isn't guaranteed.
@@ -41,45 +42,40 @@ Highlighting"): Abogen's web `SubtitleWriter` emits plain `.ass`, so the driver 
 `conversion_runner.SubtitleWriter` (to emit `{\kf<cs>}` per word). `get_pipeline` is a closure and
 can't be patched — patch the class method + module attribute instead.
 
-## Cross-platform model (paths.py is the keystone)
+## Data layout (paths.py is the keystone) — everything lives in `<app>/data`
 
 `app/paths.py` is **dependency-free** and the single source of truth for filesystem locations — it
 breaks the `settings ↔ video_builder` import cycle, so keep it import-light.
 - `config_dir()` — `<app_root>/data` by default (override: `VABK_DATA_DIR`). Holds `config.json`,
-  `abogen-runtime/` (the provisioned env), `ffmpeg/`, and `uv-cache/`. Living **inside the app folder**
-  keeps a clone self-contained (delete it = clean uninstall) and dodges the cloud-managed user profile,
-  where uv hardlinks fail (os error 396). `provision_abogen` sets `UV_CACHE_DIR` here so the cache is
-  co-located with the venv (hardlinks work), and still falls back to `--link-mode=copy` if they ever fail.
-- `app_root()` — project root from source, exe dir when frozen.
-- All OS-specific code is guarded by `sys.platform` / `os.name`. **Never hard-code a path.**
+  `abogen-runtime/` (the provisioned env), `ffmpeg/`, `uv/` (auto-downloaded uv), `hf-cache/` (the
+  Kokoro models, via `HF_HOME` set in `abogen_client._driver_env`), and `uv-cache/`. Keeping it all
+  **inside the app folder** makes the app portable/self-contained and dodges the cloud-managed user
+  profile, where uv hardlinks fail (os error 396). `provision_abogen` sets `UV_CACHE_DIR` here so the
+  cache is co-located with the venv (hardlinks work), and still falls back to `--link-mode=copy` if not.
+- `app_root()` — project root from source, **exe dir when frozen** (so `data/` sits next to the exe).
 
 **First-run workspace** (`main._maybe_first_run` + `ui/first_run_dialog.py`): on first launch a dialog
 picks a base folder (default = `app_root()`) and `settings.derive_workspace()` creates `Input/`,
 `Output/`, `Visual Audiobooks/` under it; `workspace_configured` then suppresses the prompt. Under
 `--smoke` the dialog is skipped (headless default).
 
-## GPU acceleration (real, end-to-end)
+## GPU acceleration
 
-`provisioning.detect_accelerator()` returns `cuda` | `mps` | `cpu` and drives **both** the torch wheel
-and the UI status label (`accelerator_label`, plus `abogen_client.gpu_status` which runs Abogen's own
-`get_gpu_acceleration` in its interpreter).
-- **TTS / Apple Silicon:** Abogen's web pipeline already selects `mps` on Darwin+arm (its
-  `_select_device`). Two things make it actually work here: `provision_abogen` installs the
-  **MPS-capable** wheel on Mac (`--torch-backend auto`, *not* cpu — the old `has_nvidia_gpu` default
-  would have forced CPU), and `abogen_client._driver_env` sets `PYTORCH_ENABLE_MPS_FALLBACK=1` (Abogen
-  sets this in its `main.py`, which the driver never runs).
-- **Video:** `video_builder.VIDEO_CODECS` includes NVENC, **VideoToolbox** (`hevc/h264_videotoolbox`),
-  and CPU encoders. `default_video_codec()` resolves per platform (nvenc on Win, videotoolbox on Mac).
-  Rate control differs per family — see `quality_flags` (NVENC `-cq`, VideoToolbox `-q:v -allow_sw 1`,
-  CPU `-crf`) and `derive_suffix` (`cq`/`q`/`crf`).
+`provisioning.detect_accelerator()` returns `cuda` | `cpu` and drives the torch wheel choice plus the
+UI status label (`accelerator_label`, and `abogen_client.gpu_status` which runs Abogen's own
+`get_gpu_acceleration` in its interpreter). `provision_abogen` installs the CUDA wheel
+(`--torch-backend auto`) when an NVIDIA GPU is detected, else CPU. Video: `video_builder.VIDEO_CODECS`
+is NVENC (`hevc/h264/av1_nvenc`) + CPU encoders (x265/x264/aom); `default_video_codec()` → `hevc_nvenc`
+(the UI filters by `available_encoders` and the user can pick a CPU encoder if there's no NVENC).
 
-## ffmpeg auto-download (`provisioning.ensure_ffmpeg`)
+## Auto-downloads: ffmpeg + uv (`provisioning.ensure_ffmpeg` / `ensure_uv`)
 
-Pinned, static, **SHA-256-verified** `.zip` builds in `FFMPEG_BUILDS` (gyan.dev essentials on Windows,
-osxexperts arm64 on macOS — both extracted with the stdlib `zipfile`, no extra deps). Downloads only
-when nothing is on PATH; cached in `config_dir()/ffmpeg/`. The render/pipeline workers call it at the
-start of `run()` (off the UI thread) so rendering "just works". To update: bump url + sha256 in one
-place. **gyan's `.7z` uses BCJ2, which py7zr can't decode — use the `.zip`.**
+Pinned, **SHA-256-verified** `.zip` downloads, extracted with the stdlib `zipfile` (no extra deps),
+into `<app>/data`: ffmpeg from gyan.dev essentials (`FFMPEG_BUILDS`, has NVENC + x264/x265), and uv
+from its GitHub release (`UV_BUILD`) when not already on PATH. The render/pipeline workers call
+`ensure_ffmpeg()` at the start of `run()` (off the UI thread); `provision_abogen` calls `ensure_uv()`.
+To update either: bump url + sha256 in one place. **gyan's `.7z` uses BCJ2, which py7zr can't decode —
+use the `.zip`.**
 
 ## `video_builder.py` (the ffmpeg engine — GUI-agnostic, also a CLI)
 
@@ -93,11 +89,13 @@ explicit `-f <mux>`; `set_ass_font_size()` rewrites the `.ass` Style fontsize; e
 `main.py` builds four tabs: **Full Pipeline** (`ui/pipeline_tab.py`, book→audio→video), **Abogen**
 (`ui/abogen_tab.py`, audio-only — *subclasses `PipelineTab`* with `audio_only=True`, reusing its
 provisioning/voice/chapter machinery), **FFMPEG** (`ui/video_tab.py`, render existing `.m4b`+`.ass`),
-**Settings** (`ui/settings_tab.py`, tool paths + "Set up ffmpeg" + default folders).
+**Settings** (`ui/settings_tab.py`, tool paths + "Set up ffmpeg" + default folders). The Full
+Pipeline/Abogen tabs show Abogen + FFmpeg status indicators and one **Download Dependencies** button
+(`_download_dependencies`) that provisions whatever's missing.
 
 Long work runs on QThreads in `ui/*_worker.py`, posting results via Qt signals: `PipelineWorker`
 (Abogen then ffmpeg per book), `RenderWorker` (ffmpeg only), `ProvisionWorker` (install Abogen),
-`ExtractWorker` (chapter list). The render/pipeline workers parallelize with a `ThreadPoolExecutor`
+`FfmpegWorker` (download ffmpeg), `ExtractWorker` (chapter list). The render/pipeline workers parallelize with a `ThreadPoolExecutor`
 sized by the "Parallel" spinbox (default 3, cap 12) and call `ensure_ffmpeg()` at the top of `run()`.
 `PipelineWorker` generates into a **temp dir** then moves `.m4b`/`.ass` to the audio folder and `.mp4`
 to the output folder, flat (Abogen forces a timestamped subfolder internally — hence temp-then-move via
@@ -105,18 +103,19 @@ to the output folder, flat (Abogen forces a timestamped subfolder internally —
 
 ## Commands
 
-```bash
-# run from source (or use the Start VAbk Studio.bat / .command launchers)
+```powershell
+# run from source (or double-click "Start VAbk Studio.bat")
 uv venv --python 3.12 .venv
-uv pip install --python .venv/Scripts/python.exe -r requirements.txt   # mac/Linux: .venv/bin/python
-.venv/Scripts/python.exe run.py
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.venv\Scripts\python.exe run.py
 ```
 
 Verify (no pytest/lint suite):
-- Offscreen smoke: `QT_QPA_PLATFORM=offscreen .venv/.../python run.py --smoke` (constructs 4 tabs, exit 0).
+- Offscreen smoke: `QT_QPA_PLATFORM=offscreen .venv\Scripts\python.exe run.py --smoke` (constructs 4 tabs, exit 0).
 - ffmpeg CLI: `python -m app.video_builder encoders` · `... render --audio X.m4b --outdir out --dump-cmd`.
-- ffmpeg download: delete `<config>/VAbkStudio/ffmpeg/` and start a render (re-fetches + verifies).
-- Build the optional exe: `.\build.ps1` → `dist\VAbkStudio.exe` (PyInstaller spec at `build/VAbkStudio.spec`).
+- ffmpeg download: delete `data\ffmpeg\` and start a render (re-fetches + verifies).
+- Build the exe: `.\build.ps1` → `dist\VAbkStudio.exe` (spec at `build/VAbkStudio.spec`). Pushing a
+  `v*` tag triggers `.github/workflows/release.yml` to build it and attach it to a GitHub Release.
 
 ## Rebuild gotchas
 - PyInstaller cannot overwrite a **running** `VAbkStudio.exe` — stop it first.
@@ -126,5 +125,6 @@ Verify (no pytest/lint suite):
   the next run; a finished file only appears after the atomic replace).
 
 ## Environment specifics
-Pinned upstream Abogen commit lives in `provisioning.DEFAULT_PIN`. macOS may need `espeak-ng`
-(`brew install espeak-ng`) for Kokoro's phonemizer. The PyInstaller spec excludes torch/abogen/numpy.
+Windows-only. Pinned upstream Abogen commit lives in `provisioning.DEFAULT_PIN`; pinned ffmpeg/uv in
+`FFMPEG_BUILDS` / `UV_BUILD`. The PyInstaller spec excludes torch/abogen/numpy. When frozen,
+`app_root()` is the exe's dir, so `data/` (and all downloads) sit next to `VAbkStudio.exe`.

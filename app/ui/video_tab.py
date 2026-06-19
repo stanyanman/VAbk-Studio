@@ -193,7 +193,7 @@ class VideoTab(QWidget):
         form.addRow("Encoder preset:", self.preset_combo)
 
         self.quality_spin = QSpinBox()
-        self.quality_spin.setRange(0, 100)  # CRF/CQ ~0-63; VideoToolbox -q:v ~1-100
+        self.quality_spin.setRange(0, 63)  # CQ (NVENC) / CRF (CPU)
         self.quality_label = QLabel("Quality (CQ):")
         form.addRow(self.quality_label, self.quality_spin)
 
