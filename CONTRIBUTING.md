@@ -14,7 +14,7 @@ uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe run.py
 ```
 
-(Or just double-click `Start VAbk Studio.bat`.)
+(End users don't do this — they just download the portable `VAbkStudio.exe` from Releases.)
 
 ## Verifying a change (there is no pytest/lint suite)
 

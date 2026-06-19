@@ -23,22 +23,16 @@ An **NVIDIA GPU (CUDA + NVENC)** makes it fast; without one it falls back to CPU
 
 ## Get it running
 
-### Option 1 — Download the app (no Python needed)
-Grab **`VAbkStudio.exe`** from the [**Releases**](https://github.com/stanyanman/VAbk-Studio/releases)
-page, drop it in **its own folder**, and double-click it. That's it — there's no installer and no
-Python to set up.
+1. Download **`VAbkStudio.exe`** from the [**Releases**](https://github.com/stanyanman/VAbk-Studio/releases) page.
+2. Put it in **its own folder** (it creates files next to itself).
+3. Double-click it.
 
-On first launch it asks where to keep your files and makes an `Input/`, `Output/`, and
-`Visual Audiobooks/` folder, then downloads what it needs into `data/` next to the exe (see below).
+That's the whole install — no Python, no setup, no installer. On first launch it asks where to keep
+your files and makes `Input/`, `Output/`, and `Visual Audiobooks/` folders, then downloads what it
+needs into a `data/` folder beside the exe (see below). It's a single **portable** app: move the
+folder anywhere, or delete it to uninstall.
 
-### Option 2 — Run from source
-```powershell
-git clone https://github.com/stanyanman/VAbk-Studio.git
-cd VAbk-Studio
-```
-Then double-click **`Start VAbk Studio.bat`**. It creates an isolated `.venv`, installs the small GUI
-dependencies, and launches the app. (Needs [`uv`](https://docs.astral.sh/uv/) **or** Python 3.12 — the
-launcher uses whichever it finds.)
+> Windows SmartScreen may warn about the unsigned exe the first time — click **More info → Run anyway**.
 
 ---
 
@@ -122,8 +116,7 @@ the exe and attach it to a Release automatically.
 ## Requirements
 - Windows 10/11.
 - An NVIDIA GPU (CUDA/NVENC) for acceleration — CPU works but is much slower.
-- For the **exe**: nothing else. For **run-from-source**: `uv` or Python 3.12 on PATH.
-- ffmpeg and uv are auto-downloaded into `data/` if not already present.
+- Nothing to pre-install: ffmpeg and uv are auto-downloaded into `data/` as needed.
 
 ---
 

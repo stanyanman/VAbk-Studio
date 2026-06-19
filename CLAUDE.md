@@ -104,7 +104,7 @@ to the output folder, flat (Abogen forces a timestamped subfolder internally —
 ## Commands
 
 ```powershell
-# run from source (or double-click "Start VAbk Studio.bat")
+# run from source (for development; end users just get the .exe)
 uv venv --python 3.12 .venv
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 .venv\Scripts\python.exe run.py
