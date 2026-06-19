@@ -1,0 +1,12 @@
+# Dependencies for VAbk Studio (the GUI orchestrator only).
+#
+# Abogen (Kokoro TTS, multi-GB PyTorch) and ffmpeg are EXTERNAL — they are not
+# installed here. The app provisions Abogen at runtime via `uv`, and resolves
+# ffmpeg from PATH or auto-downloads a pinned static build (Settings tab).
+
+PyQt6==6.11.0
+requests==2.34.2
+
+# Note: building a standalone .exe additionally needs PyInstaller — build.ps1
+# installs that itself, so it's intentionally not listed here (keeps the
+# run-from-source install lean).

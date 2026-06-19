@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts (the spec in build/ IS tracked; its work dir and output are not)
+build/work/
+dist/
+
+# Editor / IDE / Claude Code local files
+.claude/
+.vscode/
+.idea/
+
+# OS cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# App config lives in the per-user config dir; ignore any stray local copy
+config.json
+
+# Workspace media folders (created on first run inside the app folder by default)
+/Input/
+/Output/
+/Visual Audiobooks/
+
+# Scratch
+_dbg.py
+*.7z
