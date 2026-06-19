@@ -171,6 +171,7 @@ class PipelineTab(QWidget):
         self.parallel_spin.setRange(1, 12)
         self.parallel_spin.setToolTip("How many books to process at once (sweet spot ~8; >12 degrades)")
         self.parallel_spin.setValue(int(self.cfg.get("parallel_jobs", 3)))
+        self.parallel_spin.valueChanged.connect(self._save_parallel)
         run_row.addWidget(self.parallel_spin)
         run_row.addWidget(self.overall, 1)
         root.addLayout(run_row)
@@ -526,6 +527,11 @@ class PipelineTab(QWidget):
             self.audio_edit.setText(d)
 
     # ---- run -------------------------------------------------------------
+    def _save_parallel(self, v: int):
+        """Persist the Parallel value immediately (not only when a job starts)."""
+        self.cfg["parallel_jobs"] = int(v)
+        self._save_cfg(self.cfg)
+
     def _persist(self):
         self.cfg["abogen"] = self.gather_abogen_cfg()
         self.cfg["output_folder"] = self.out_edit.text().strip()

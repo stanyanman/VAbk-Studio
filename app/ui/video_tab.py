@@ -143,6 +143,7 @@ class VideoTab(QWidget):
         self.parallel_spin.setRange(1, 12)
         self.parallel_spin.setToolTip("How many videos to encode at once (scales well to ~12; 14 can crash NVENC)")
         self.parallel_spin.setValue(int(self.cfg.get("parallel_jobs", 3)))
+        self.parallel_spin.valueChanged.connect(self._save_parallel)
         run_row.addWidget(self.parallel_spin)
         run_row.addWidget(self.overall, 1)
         root.addLayout(run_row)
@@ -446,6 +447,11 @@ class VideoTab(QWidget):
         self.log_toggle.setText("Hide log ▴" if on else "Show log ▾")
 
     # ---- run -------------------------------------------------------------
+    def _save_parallel(self, v: int):
+        """Persist the Parallel value immediately (not only when a render starts)."""
+        self.cfg["parallel_jobs"] = int(v)
+        self._save_cfg(self.cfg)
+
     def _persist(self):
         self.cfg["video"] = self.gather_settings().to_dict()
         self.cfg["output_folder"] = self.out_edit.text().strip()

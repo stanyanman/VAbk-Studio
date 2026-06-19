@@ -88,6 +88,7 @@ class AbogenTab(PipelineTab):
         self.parallel_spin.setRange(1, 12)
         self.parallel_spin.setToolTip("How many books to process at once (sweet spot ~8; >12 degrades)")
         self.parallel_spin.setValue(int(self.cfg.get("parallel_jobs", 3)))
+        self.parallel_spin.valueChanged.connect(self._save_parallel)
         run_row.addWidget(self.parallel_spin)
         run_row.addWidget(self.overall, 1)
         root.addLayout(run_row)
