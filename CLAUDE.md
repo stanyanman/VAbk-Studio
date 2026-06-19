@@ -9,6 +9,9 @@ audiobooks" (a video of word-synced karaoke captions over a black canvas while n
 is a thin **GUI orchestrator**: it does NOT embed Abogen (Kokoro TTS) or ffmpeg — it drives them as
 external processes. See `README.md` for the end-user tour, `CONTRIBUTING.md` for how to verify changes.
 
+**Status:** experimental, vibecoded for personal use — built fast and shared as-is. Favor pragmatic,
+working fixes over ceremony; there's no test/lint suite and stability isn't guaranteed.
+
 ## The three-process architecture (read this first)
 
 1. **The app** (`app/`, runs in `.venv`) — pure PyQt6 + `requests`. Never imports torch/kokoro/abogen.
@@ -42,8 +45,11 @@ can't be patched — patch the class method + module attribute instead.
 
 `app/paths.py` is **dependency-free** and the single source of truth for filesystem locations — it
 breaks the `settings ↔ video_builder` import cycle, so keep it import-light.
-- `config_dir()` — `%APPDATA%\VAbkStudio` (Win) / `~/Library/Application Support/VAbkStudio` (mac) /
-  `~/.config/VAbkStudio` (Linux). Holds `config.json`, `abogen-runtime/`, and `ffmpeg/` (the cache).
+- `config_dir()` — `<app_root>/data` by default (override: `VABK_DATA_DIR`). Holds `config.json`,
+  `abogen-runtime/` (the provisioned env), `ffmpeg/`, and `uv-cache/`. Living **inside the app folder**
+  keeps a clone self-contained (delete it = clean uninstall) and dodges the cloud-managed user profile,
+  where uv hardlinks fail (os error 396). `provision_abogen` sets `UV_CACHE_DIR` here so the cache is
+  co-located with the venv (hardlinks work), and still falls back to `--link-mode=copy` if they ever fail.
 - `app_root()` — project root from source, exe dir when frozen.
 - All OS-specific code is guarded by `sys.platform` / `os.name`. **Never hard-code a path.**
 

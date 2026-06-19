@@ -23,7 +23,9 @@ Thumbs.db
 desktop.ini
 .DS_Store
 
-# App config lives in the per-user config dir; ignore any stray local copy
+# App data — config, the provisioned Abogen env, ffmpeg, and uv's cache (multi-GB,
+# created at runtime inside the folder so the app is self-contained)
+/data/
 config.json
 
 # Workspace media folders (created on first run inside the app folder by default)

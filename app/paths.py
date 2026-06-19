@@ -9,28 +9,6 @@ import os
 import sys
 from pathlib import Path
 
-# Filesystem-safe identifier (no spaces) used for the per-user config/cache folder.
-APP_DIRNAME = "VAbkStudio"
-
-
-def config_dir() -> Path:
-    """Per-user config/data directory, created if missing.
-
-    Windows: %APPDATA%\\VAbkStudio
-    macOS:   ~/Library/Application Support/VAbkStudio
-    Linux:   $XDG_CONFIG_HOME/VAbkStudio  (or ~/.config/VAbkStudio)
-    """
-    if sys.platform == "win32":
-        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-    elif sys.platform == "darwin":
-        base = str(Path.home() / "Library" / "Application Support")
-    else:
-        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    d = Path(base) / APP_DIRNAME
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
 def app_root() -> Path:
     """The folder the app lives in.
 
@@ -42,8 +20,31 @@ def app_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def config_dir() -> Path:
+    """App data directory — self-contained inside the app folder by default (`<app>/data`).
+
+    Holds everything the app generates: config.json, the provisioned Abogen
+    environment, the ffmpeg cache, and uv's package cache. Keeping it in the folder
+    means a clone is fully self-contained (delete the folder = clean uninstall) and
+    avoids the cloud-managed user profile (where uv hardlinks fail, os error 396).
+    Override with the VABK_DATA_DIR environment variable if the app folder isn't writable.
+    """
+    override = os.environ.get("VABK_DATA_DIR", "").strip()
+    base = Path(override) if override else (app_root() / "data")
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
 def ffmpeg_cache_dir() -> Path:
     """Where auto-downloaded ffmpeg/ffprobe binaries are cached."""
     d = config_dir() / "ffmpeg"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def uv_cache_dir() -> Path:
+    """uv's package cache, kept inside the app data dir so it's self-contained and
+    co-located with the Abogen venv — which lets uv hardlink instead of copy."""
+    d = config_dir() / "uv-cache"
     d.mkdir(parents=True, exist_ok=True)
     return d

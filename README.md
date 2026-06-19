@@ -1,5 +1,9 @@
 # VAbk Studio
 
+> ⚠️ **Experimental — vibecoded for personal use.** A personal hobby project, built fast and loose
+> for my own use and shared as-is: no guarantees, no support, no stability promises. Expect rough
+> edges, and use at your own risk.
+
 An all-in-one desktop app for turning books into **visual audiobooks** — a video that shows
 word-synced karaoke captions over a canvas while the narration plays.
 
@@ -142,8 +146,9 @@ Most people just run from source. If you want a double-click `.exe`:
 - A GPU for acceleration: NVIDIA (CUDA/NVENC) or Apple Silicon (MPS/VideoToolbox). CPU works, slower.
 - ffmpeg is auto-downloaded if not on PATH.
 
-Settings live in the per-user config dir (`%APPDATA%\VAbkStudio` on Windows,
-`~/Library/Application Support/VAbkStudio` on macOS).
+Everything the app generates — settings, the Abogen environment, ffmpeg, and uv's package cache —
+lives in a **`data/` folder inside the app folder**, so a clone is fully self-contained (delete the
+folder = clean uninstall). Point it elsewhere with the `VABK_DATA_DIR` environment variable.
 
 ---
 

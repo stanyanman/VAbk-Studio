@@ -22,7 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from .paths import ffmpeg_cache_dir
+from .paths import ffmpeg_cache_dir, uv_cache_dir
 
 CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -150,6 +150,11 @@ def provision_abogen(
     if not uv:
         raise RuntimeError("uv is not installed. Install it from https://docs.astral.sh/uv/ first.")
 
+    # Keep uv's cache inside the app data dir, co-located with the venv, so installs
+    # hardlink instead of copy and stay self-contained.
+    uv_env = dict(os.environ)
+    uv_env["UV_CACHE_DIR"] = str(uv_cache_dir())
+
     runtime = Path(runtime_dir)
     runtime.mkdir(parents=True, exist_ok=True)
     venv = runtime / "venv"
@@ -157,7 +162,7 @@ def provision_abogen(
 
     if not py.is_file():
         _log(on_log, "Creating Python 3.12 environment…")
-        if _stream([uv, "venv", "--python", "3.12", str(venv)], on_log) != 0:
+        if _stream([uv, "venv", "--python", "3.12", str(venv)], on_log, env=uv_env) != 0:
             raise RuntimeError("Failed to create the Python environment.")
 
     if use_gpu is None:
@@ -169,16 +174,28 @@ def provision_abogen(
 
     ref = pin or "main"
     spec = f"abogen @ git+{ABOGEN_REPO}@{ref}"
-    env = dict(os.environ)
-    env["UV_TORCH_BACKEND"] = backend
 
-    code = _stream([uv, "pip", "install", "--python", str(py),
-                    "--torch-backend", backend, spec], on_log, env=env)
+    def _install(be: str, copy: bool) -> int:
+        cmd = [uv, "pip", "install", "--python", str(py)]
+        if copy:
+            cmd += ["--link-mode", "copy"]
+        cmd += ["--torch-backend", be, spec]
+        env = dict(uv_env)
+        env["UV_TORCH_BACKEND"] = be
+        return _stream(cmd, on_log, env=env)
+
+    # 1) efficient (hardlinked) install with the chosen backend
+    code = _install(backend, copy=False)
+    # 2) hardlinking can fail on cloud-managed / cross-volume dirs (Windows os error
+    #    396) — retry copying files instead, keeping the same (GPU) backend
+    if code != 0:
+        _log(on_log, "Install failed; retrying with --link-mode=copy "
+                     "(works around cloud/hardlink errors)…")
+        code = _install(backend, copy=True)
+    # 3) last resort: CPU PyTorch
     if code != 0 and accel != "cpu":
-        _log(on_log, f"{accel.upper()} install failed; retrying with CPU PyTorch…")
-        env["UV_TORCH_BACKEND"] = "cpu"
-        code = _stream([uv, "pip", "install", "--python", str(py),
-                        "--torch-backend", "cpu", spec], on_log, env=env)
+        _log(on_log, "Still failing; retrying with CPU PyTorch…")
+        code = _install("cpu", copy=True)
     if code != 0:
         raise RuntimeError("Abogen installation failed. See the log for details.")
 
