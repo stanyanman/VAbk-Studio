@@ -36,6 +36,40 @@ folder anywhere, or delete it to uninstall.
 
 ---
 
+## Run from source (alternative to the exe)
+
+Prefer to run the Python source directly — to tweak it, or to skip the prebuilt exe entirely? You
+don't need to build anything. Two one-click launchers in the repo root handle setup for you:
+
+| Launcher | Behaviour |
+|---|---|
+| **`Run VAbk-Studio.bat`** | Runs the app with a **console** open, so you can watch logs and errors. |
+| **`Run VAbk-Studio.exe`** | Runs the app **windowless** (no console) — a cleaner, app-like launch. |
+
+Both are self-healing: on first run they create an isolated `.venv` with
+[uv](https://docs.astral.sh/uv/) (Python 3.12, auto-downloaded if you don't already have it), install
+the GUI dependencies from `requirements.txt`, then start the app. Later runs launch straight away.
+They're location-independent — double-click from anywhere.
+
+1. **Get the source** — `git clone https://github.com/stanyanman/VAbk-Studio.git` (or download the
+   repo ZIP via the green **Code** button and unzip it).
+2. **Install [uv](https://docs.astral.sh/uv/)** if you don't have it:
+   `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
+3. **Double-click `Run VAbk-Studio.bat`** (or `Run VAbk-Studio.exe`).
+
+Or set it up by hand:
+
+```powershell
+uv venv --python 3.12 .venv
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
+.venv\Scripts\python.exe run.py
+```
+
+Everything still lands in the portable `data/` folder beside the source, exactly like the exe. (To
+produce your own standalone exe instead, see [Build the .exe yourself](#build-the-exe-yourself).)
+
+---
+
 ## What it downloads, and where
 Everything goes into a **`data/` folder beside the app** — nothing touches your user profile:
 
