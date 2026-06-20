@@ -85,7 +85,7 @@ class AbogenTab(PipelineTab):
         run_row.addWidget(self.cancel_btn)
         run_row.addWidget(QLabel("Parallel:"))
         self.parallel_spin = QSpinBox()
-        self.parallel_spin.setRange(1, 12)
+        self.parallel_spin.setRange(1, 999)
         self.parallel_spin.setToolTip("How many books to process at once (sweet spot ~8; >12 degrades)")
         self.parallel_spin.setValue(int(self.cfg.get("parallel_jobs", 3)))
         self.parallel_spin.valueChanged.connect(self._save_parallel)

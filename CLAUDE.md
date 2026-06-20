@@ -96,7 +96,7 @@ Pipeline/Abogen tabs show Abogen + FFmpeg status indicators and one **Download D
 Long work runs on QThreads in `ui/*_worker.py`, posting results via Qt signals: `PipelineWorker`
 (Abogen then ffmpeg per book), `RenderWorker` (ffmpeg only), `ProvisionWorker` (install Abogen),
 `FfmpegWorker` (download ffmpeg), `ExtractWorker` (chapter list). The render/pipeline workers parallelize with a `ThreadPoolExecutor`
-sized by the "Parallel" spinbox (default 3, cap 12) and call `ensure_ffmpeg()` at the top of `run()`.
+sized by the "Parallel" spinbox (default 3, no upper cap) and call `ensure_ffmpeg()` at the top of `run()`.
 `PipelineWorker` generates into a **temp dir** then moves `.m4b`/`.ass` to the audio folder and `.mp4`
 to the output folder, flat (Abogen forces a timestamped subfolder internally — hence temp-then-move via
 `_move_into`).

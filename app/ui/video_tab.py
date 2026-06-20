@@ -140,7 +140,7 @@ class VideoTab(QWidget):
         run_row.addWidget(self.cancel_btn)
         run_row.addWidget(QLabel("Parallel:"))
         self.parallel_spin = QSpinBox()
-        self.parallel_spin.setRange(1, 12)
+        self.parallel_spin.setRange(1, 999)
         self.parallel_spin.setToolTip("How many videos to encode at once (scales well to ~12; 14 can crash NVENC)")
         self.parallel_spin.setValue(int(self.cfg.get("parallel_jobs", 3)))
         self.parallel_spin.valueChanged.connect(self._save_parallel)
