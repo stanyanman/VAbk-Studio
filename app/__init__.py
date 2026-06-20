@@ -7,5 +7,5 @@ This package is the GUI/orchestrator. It does not embed Abogen or ffmpeg; it dri
 them as external processes (see provisioning.py / abogen_client.py / video_builder.py).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 APP_NAME = "VAbk Studio"
