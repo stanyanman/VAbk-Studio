@@ -30,6 +30,7 @@ exe = EXE(
     a.datas,
     [],
     name="VAbkStudio",
+    icon=os.path.join(project_root, "build", "VAbkStudio.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
